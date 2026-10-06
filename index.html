@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Астродрифт</title>
+<style>
+  :root {
+    --bg: #05060f;
+    --panel: rgba(12, 16, 36, 0.78);
+    --line: rgba(140, 170, 255, 0.22);
+    --text: #e7ecff;
+    --muted: #8f9bc7;
+    --accent: #ffd45c;
+    --ship: #6fe3ff;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  #game { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  .hud {
+    position: absolute; top: 12px; left: 16px; right: 16px;
+    display: flex; gap: 8px; justify-content: space-between;
+    pointer-events: none;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 6px 12px;
+    min-width: 0;
+    backdrop-filter: blur(6px);
+  }
+  .stat .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .stat .value { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat.score .value { color: var(--accent); }
+  .stat.level .value { color: var(--ship); }
+
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+    background: radial-gradient(ellipse at center, rgba(5,6,15,.55), rgba(5,6,15,.85));
+  }
+  .overlay[hidden] { display: none; }
+  .card {
+    width: 100%; max-width: 420px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 28px 24px;
+    text-align: center;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  h1 {
+    margin: 0 0 6px; font-size: 34px; letter-spacing: .04em;
+    background: linear-gradient(90deg, var(--ship), var(--accent));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  h2 { margin: 0 0 8px; font-size: 26px; color: var(--danger); }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .rules { text-align: left; margin: 0 0 22px; padding: 0; list-style: none; font-size: 14px; line-height: 1.5; }
+  .rules li { display: flex; gap: 10px; align-items: flex-start; padding: 5px 0; }
+  .rules .ico { flex: 0 0 22px; text-align: center; }
+  kbd {
+    display: inline-block; min-width: 22px; padding: 1px 6px;
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+    font: 600 12px/1.5 ui-monospace, Consolas, monospace; color: var(--text);
+    background: rgba(255,255,255,.04);
+  }
+  .results { display: flex; gap: 10px; justify-content: center; margin: 14px 0 22px; }
+  .results .stat { flex: 1; }
+  .results .value { font-size: 28px; }
+  .newbest { color: var(--accent); font-size: 13px; margin: -10px 0 18px; min-height: 1em; }
+  button {
+    font: inherit; font-weight: 700; font-size: 16px;
+    color: #0a0d1f; background: linear-gradient(90deg, var(--ship), var(--accent));
+    border: 0; border-radius: 10px; padding: 12px 28px; cursor: pointer;
+    box-shadow: 0 6px 20px rgba(111,227,255,.25);
+  }
+  button:hover { filter: brightness(1.08); }
+  button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 12px; }
+
+  @media (max-width: 480px) {
+    .hud { top: 8px; left: 8px; right: 8px; gap: 6px; }
+    .stat { padding: 4px 8px; }
+    .stat .value { font-size: 16px; }
+    .stat .label { font-size: 10px; }
+    h1 { font-size: 28px; }
+    .card { padding: 22px 16px; }
+  }
+</style>
+</head>
+<body>
+<div id="game">
+  <canvas id="cv"></canvas>
+
+  <div class="hud" aria-live="polite">
+    <div class="stat score"><div class="label">Счёт</div><div class="value" id="hudScore">0</div></div>
+    <div class="stat"><div class="label">Рекорд</div><div class="value" id="hudBest">0</div></div>
+    <div class="stat level"><div class="label">Уровень</div><div class="value" id="hudLevel">1</div></div>
+  </div>
+
+  <div class="overlay" id="startScreen">
+    <div class="card">
+      <h1>АСТРОДРИФТ</h1>
+      <p class="sub">Собирай звёзды. Уклоняйся от мусора. Не останавливайся.</p>
+      <ul class="rules">
+        <li><span class="ico">🚀</span><span>Управление: <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> или <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>. Корабль дрейфует по инерции.</span></li>
+        <li><span class="ico">⭐</span><span>Каждая звезда — <b>+10 очков</b>. На поле всегда 5 звёзд.</span></li>
+        <li><span class="ico">☄️</span><span>Одно касание мусора — конец игры.</span></li>
+        <li><span class="ico">📈</span><span>Каждые 15 секунд уровень растёт: мусора больше и он быстрее.</span></li>
+      </ul>
+      <button id="startBtn">Начать</button>
+      <div class="hint">или нажмите <kbd>Enter</kbd> / <kbd>Пробел</kbd></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overScreen" hidden>
+    <div class="card">
+      <h2>Корабль разбит</h2>
+      <p class="sub" id="overInfo">Вы продержались 0 с</p>
+      <div class="results">
+        <div class="stat score"><div class="label">Счёт</div><div class="value" id="overScore">0</div></div>
+        <div class="stat"><div class="label">Рекорд</div><div class="value" id="overBest">0</div></div>
+      </div>
+      <div class="newbest" id="newBest"></div>
+      <button id="restartBtn">Играть снова</button>
+      <div class="hint">или нажмите <kbd>Enter</kbd> / <kbd>Пробел</kbd></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Настройки ----------
+  const CFG = {
+    shipRadius: 11,
+    shipAccel: 900,        // px/s²
+    shipDrag: 2.2,         // коэффициент торможения (экспоненциальный)
+    shipMaxSpeed: 420,
+    starCount: 5,
+    starRadius: 10,
+    starPoints: 10,
+    levelEvery: 15,        // секунд на уровень
+    baseSpawn: 1.3,        // интервал появления мусора, с
+    minSpawn: 0.22,
+    baseDebrisSpeed: 90,
+    debrisSpeedPerLevel: 22,
+  };
+
+  // ---------- DOM ----------
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const hudScore = $('hudScore'), hudBest = $('hudBest'), hudLevel = $('hudLevel');
+  const startScreen = $('startScreen'), overScreen = $('overScreen');
+
+  let W = 0, H = 0, DPR = 1;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    buildBackground();
+    if (ship) { ship.x = clamp(ship.x, 0, W); ship.y = clamp(ship.y, 0, H); }
+    for (const s of stars) { s.x = clamp(s.x, 30, W - 30); s.y = clamp(s.y, 80, H - 30); }
+  }
+
+  // ---------- Утилиты ----------
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const dist2 = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+
+  // ---------- Фон: параллакс-звёзды ----------
+  let bgLayers = [];
+  function buildBackground() {
+    const area = W * H;
+    bgLayers = [0.15, 0.35, 0.7].map((depth, i) => {
+      const n = Math.round(area / (6000 + i * 4000));
+      const pts = [];
+      for (let k = 0; k < n; k++) pts.push({ x: Math.random() * W, y: Math.random() * H, r: rand(0.4, 1.1) + i * 0.35, tw: Math.random() * 6.28 });
+      return { depth, pts };
+    });
+  }
+  function drawBackground(t, dt) {
+    const g = ctx.createRadialGradient(W * 0.7, H * 0.25, 0, W * 0.7, H * 0.25, Math.max(W, H));
+    g.addColorStop(0, '#141a3d'); g.addColorStop(0.5, '#0a0d24'); g.addColorStop(1, '#05060f');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    const vx = ship ? ship.vx : 0, vy = ship ? ship.vy : 20;
+    for (const layer of bgLayers) {
+      for (const p of layer.pts) {
+        p.x -= (vx * 0.15 + 6) * layer.depth * dt;
+        p.y -= (vy * 0.15) * layer.depth * dt;
+        if (p.x < 0) p.x += W; else if (p.x > W) p.x -= W;
+        if (p.y < 0) p.y += H; else if (p.y > H) p.y -= H;
+        const a = 0.35 + 0.35 * Math.sin(t * 2 + p.tw) * layer.depth + layer.depth * 0.4;
+        ctx.fillStyle = `rgba(200,215,255,${clamp(a, 0.1, 1)})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill();
+      }
+    }
+  }
+
+  // ---------- Ввод ----------
+  const keys = new Set();
+  const KEYMAP = {
+    ArrowLeft: 'L', KeyA: 'L', ArrowRight: 'R', KeyD: 'R',
+    ArrowUp: 'U', KeyW: 'U', ArrowDown: 'D', KeyS: 'D',
+  };
+  window.addEventListener('keydown', e => {
+    const k = KEYMAP[e.code];
+    if (k) { keys.add(k); e.preventDefault(); }
+    if ((e.code === 'Enter' || e.code === 'Space') && state !== 'play') {
+      e.preventDefault(); startGame();
+    }
+  });
+  window.addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) keys.delete(k); });
+  window.addEventListener('blur', () => keys.clear());
+
+  // ---------- Состояние ----------
+  let state = 'start';      // start | play | over
+  let ship = null, stars = [], debris = [], particles = [];
+  let score = 0, best = 0, level = 1, elapsed = 0, spawnTimer = 0;
+
+  function newShip() {
+    return { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, thrust: 0 };
+  }
+
+  function spawnStar() {
+    let x, y, tries = 0;
+    do {
+      x = rand(30, W - 30); y = rand(80, H - 30); tries++;
+    } while (tries < 40 && (
+      (ship && dist2({ x, y }, ship) < 140 ** 2) ||
+      stars.some(s => dist2({ x, y }, s) < 70 ** 2)
+    ));
+    return { x, y, phase: Math.random() * 6.28, born: 0 };
+  }
+
+  function spawnDebris() {
+    const r = rand(9, 16 + level * 1.6);
+    const edge = Math.floor(Math.random() * 4);
+    const m = r + 10;
+    let x, y;
+    if (edge === 0) { x = rand(0, W); y = -m; }
+    else if (edge === 1) { x = W + m; y = rand(0, H); }
+    else if (edge === 2) { x = rand(0, W); y = H + m; }
+    else { x = -m; y = rand(0, H); }
+    // цель — случайная точка во внутренней части поля
+    const tx = rand(W * 0.15, W * 0.85), ty = rand(H * 0.15, H * 0.85);
+    const ang = Math.atan2(ty - y, tx - x) + rand(-0.25, 0.25);
+    const speed = (CFG.baseDebrisSpeed + (level - 1) * CFG.debrisSpeedPerLevel) * rand(0.75, 1.35);
+    const n = 7 + Math.floor(Math.random() * 4);
+    const shape = [];
+    for (let i = 0; i < n; i++) shape.push(rand(0.72, 1.08));
+    debris.push({
+      x, y, r, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
+      rot: Math.random() * 6.28, vr: rand(-2, 2), shape,
+      hue: Math.random() < 0.25 ? 'metal' : 'rock',
+    });
+  }
+
+  function burst(x, y, color, n, speed, life) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.283, s = rand(speed * 0.3, speed);
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life, max: life, color, r: rand(1.2, 3) });
+    }
+  }
+
+  function startGame() {
+    ship = newShip();
+    stars = []; debris = []; particles = [];
+    for (let i = 0; i < CFG.starCount; i++) stars.push(spawnStar());
+    score = 0; level = 1; elapsed = 0; spawnTimer = 1.2;
+    keys.clear();
+    state = 'play';
+    startScreen.hidden = true; overScreen.hidden = true;
+    updateHud();
+  }
+
+  function gameOver() {
+    state = 'over';
+    burst(ship.x, ship.y, '#ff9a5c', 60, 320, 1.1);
+    burst(ship.x, ship.y, '#6fe3ff', 30, 220, 0.9);
+    const isNew = score > best && score > 0;
+    best = Math.max(best, score);
+    $('overScore').textContent = score;
+    $('overBest').textContent = best;
+    $('overInfo').textContent = `Вы продержались ${elapsed.toFixed(1)} с и дошли до уровня ${level}`;
+    $('newBest').textContent = isNew ? '★ Новый рекорд сессии!' : '';
+    updateHud();
+    setTimeout(() => { if (state === 'over') { overScreen.hidden = false; $('restartBtn').focus(); } }, 650);
+  }
+
+  function updateHud() {
+    hudScore.textContent = score;
+    hudBest.textContent = Math.max(best, score);
+    hudLevel.textContent = level;
+  }
+
+  // ---------- Обновление ----------
+  function update(dt) {
+    // частицы обновляются всегда
+    for (const p of particles) {
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= Math.exp(-2 * dt); p.vy *= Math.exp(-2 * dt);
+      p.life -= dt;
+    }
+    particles = particles.filter(p => p.life > 0);
+
+    if (state === 'start') {
+      // демонстрационный мусор на заднем плане
+      spawnTimer -= dt;
+      if (spawnTimer <= 0) { spawnDebris(); spawnTimer = 1.6; }
+    }
+
+    if (state === 'play') {
+      elapsed += dt;
+      const newLevel = 1 + Math.floor(elapsed / CFG.levelEvery);
+      if (newLevel !== level) { level = newLevel; updateHud(); }
+
+      // корабль: инерционное движение
+      let ax = 0, ay = 0;
+      if (keys.has('L')) ax -= 1;
+      if (keys.has('R')) ax += 1;
+      if (keys.has('U')) ay -= 1;
+      if (keys.has('D')) ay += 1;
+      const len = Math.hypot(ax, ay);
+      ship.thrust = len > 0 ? 1 : 0;
+      if (len > 0) {
+        ax /= len; ay /= len;
+        ship.vx += ax * CFG.shipAccel * dt;
+        ship.vy += ay * CFG.shipAccel * dt;
+        const target = Math.atan2(ay, ax);
+        let d = target - ship.angle;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        ship.angle += d * Math.min(1, dt * 12);
+      }
+      const drag = Math.exp(-CFG.shipDrag * dt * (len > 0 ? 0.35 : 1));
+      ship.vx *= drag; ship.vy *= drag;
+      const sp = Math.hypot(ship.vx, ship.vy);
+      if (sp > CFG.shipMaxSpeed) { ship.vx *= CFG.shipMaxSpeed / sp; ship.vy *= CFG.shipMaxSpeed / sp; }
+      ship.x += ship.vx * dt; ship.y += ship.vy * dt;
+      // мягкие границы поля
+      const R = CFG.shipRadius;
+      if (ship.x < R) { ship.x = R; ship.vx = Math.abs(ship.vx) * 0.4; }
+      if (ship.x > W - R) { ship.x = W - R; ship.vx = -Math.abs(ship.vx) * 0.4; }
+      if (ship.y < R) { ship.y = R; ship.vy = Math.abs(ship.vy) * 0.4; }
+      if (ship.y > H - R) { ship.y = H - R; ship.vy = -Math.abs(ship.vy) * 0.4; }
+
+      // след двигателя
+      if (ship.thrust) {
+        const bx = ship.x - Math.cos(ship.angle) * 12, by = ship.y - Math.sin(ship.angle) * 12;
+        particles.push({
+          x: bx, y: by,
+          vx: -Math.cos(ship.angle) * rand(60, 140) + rand(-25, 25),
+          vy: -Math.sin(ship.angle) * rand(60, 140) + rand(-25, 25),
+          life: 0.35, max: 0.35, color: Math.random() < 0.5 ? '#ffd45c' : '#ff8a3d', r: rand(1.5, 3),
+        });
+      }
+
+      // звёзды
+      for (let i = 0; i < stars.length; i++) {
+        const s = stars[i];
+        s.born += dt;
+        if (dist2(s, ship) < (CFG.starRadius + CFG.shipRadius + 2) ** 2) {
+          score += CFG.starPoints;
+          burst(s.x, s.y, '#ffd45c', 18, 180, 0.6);
+          stars[i] = spawnStar();
+          updateHud();
+        }
+      }
+
+      // появление мусора
+      spawnTimer -= dt;
+      if (spawnTimer <= 0) {
+        spawnDebris();
+        const interval = Math.max(CFG.minSpawn, CFG.baseSpawn * Math.pow(0.86, level - 1));
+        spawnTimer = interval * rand(0.7, 1.3);
+      }
+    }
+
+    // мусор
+    for (const d of debris) {
+      d.x += d.vx * dt; d.y += d.vy * dt; d.rot += d.vr * dt;
+    }
+    const margin = 80;
+    debris = debris.filter(d => d.x > -margin && d.x < W + margin && d.y > -margin && d.y < H + margin);
+
+    if (state === 'play') {
+      for (const d of debris) {
+        if (dist2(d, ship) < (d.r * 0.85 + CFG.shipRadius * 0.8) ** 2) { gameOver(); break; }
+      }
+    }
+  }
+
+  // ---------- Отрисовка ----------
+  function drawStar(s, t) {
+    const pulse = 1 + Math.sin(t * 4 + s.phase) * 0.12;
+    const appear = Math.min(1, s.born * 4);
+    const r = CFG.starRadius * pulse * appear;
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.rotate(t * 0.8 + s.phase);
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 2.6);
+    glow.addColorStop(0, 'rgba(255,212,92,0.55)'); glow.addColorStop(1, 'rgba(255,212,92,0)');
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, r * 2.6, 0, 6.283); ctx.fill();
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const rr = i % 2 ? r * 0.45 : r;
+      const a = (i / 10) * 6.283 - Math.PI / 2;
+      ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#ffe58a'; ctx.fill();
+    ctx.strokeStyle = '#fff6cf'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawDebris(d) {
+    ctx.save();
+    ctx.translate(d.x, d.y); ctx.rotate(d.rot);
+    ctx.beginPath();
+    const n = d.shape.length;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 6.283, rr = d.r * d.shape[i];
+      ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    const g = ctx.createLinearGradient(-d.r, -d.r, d.r, d.r);
+    if (d.hue === 'metal') { g.addColorStop(0, '#9aa6c2'); g.addColorStop(1, '#3c4560'); }
+    else { g.addColorStop(0, '#a07a63'); g.addColorStop(1, '#3d2a24'); }
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = d.hue === 'metal' ? '#c8d3ee' : '#d29a7d';
+    ctx.globalAlpha = 0.6; ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.globalAlpha = 1;
+    // кратеры
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath(); ctx.arc(d.r * 0.25, -d.r * 0.2, d.r * 0.22, 0, 6.283); ctx.fill();
+    ctx.beginPath(); ctx.arc(-d.r * 0.3, d.r * 0.3, d.r * 0.14, 0, 6.283); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawShip(s, t) {
+    ctx.save();
+    ctx.translate(s.x, s.y); ctx.rotate(s.angle);
+    // пламя
+    if (s.thrust) {
+      const fl = 10 + Math.random() * 8;
+      ctx.beginPath();
+      ctx.moveTo(-9, -5); ctx.lineTo(-9 - fl, 0); ctx.lineTo(-9, 5); ctx.closePath();
+      const fg = ctx.createLinearGradient(-9, 0, -9 - fl, 0);
+      fg.addColorStop(0, '#fff3b0'); fg.addColorStop(0.5, '#ffb03d'); fg.addColorStop(1, 'rgba(255,80,40,0)');
+      ctx.fillStyle = fg; ctx.fill();
+    }
+    // свечение
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 28);
+    glow.addColorStop(0, 'rgba(111,227,255,0.28)'); glow.addColorStop(1, 'rgba(111,227,255,0)');
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 28, 0, 6.283); ctx.fill();
+    // корпус
+    ctx.beginPath();
+    ctx.moveTo(16, 0);
+    ctx.lineTo(-10, -11);
+    ctx.lineTo(-6, 0);
+    ctx.lineTo(-10, 11);
+    ctx.closePath();
+    const bg = ctx.createLinearGradient(-10, -10, 16, 10);
+    bg.addColorStop(0, '#2b6c8f'); bg.addColorStop(1, '#bff4ff');
+    ctx.fillStyle = bg; ctx.fill();
+    ctx.strokeStyle = '#6fe3ff'; ctx.lineWidth = 1.5; ctx.stroke();
+    // кабина
+    ctx.beginPath(); ctx.ellipse(3, 0, 4, 2.6, 0, 0, 6.283);
+    ctx.fillStyle = '#0b1530'; ctx.fill();
+    ctx.restore();
+  }
+
+  function draw(t, dt) {
+    drawBackground(t, dt);
+    for (const s of stars) drawStar(s, t);
+    for (const d of debris) drawDebris(d);
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.283); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    if (state === 'play') drawShip(ship, t);
+  }
+
+  // ---------- Цикл ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); // защита от скачков при сворачивании вкладки
+    last = now;
+    update(dt);
+    draw(now / 1000, dt);
+    requestAnimationFrame(frame);
+  }
+
+  $('startBtn').addEventListener('click', startGame);
+  $('restartBtn').addEventListener('click', startGame);
+  window.addEventListener('resize', resize);
+  resize();
+  updateHud();
+  $('startBtn').focus();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
